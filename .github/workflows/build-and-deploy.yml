@@ -28,6 +28,13 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - name: Package static artifact
+        run: tar -czf dist.tgz -C dist .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alarm-clock-dist
+          path: dist.tgz
+          if-no-files-found: error
       - name: Set lowercase image name
         id: meta
         run: |
@@ -57,6 +64,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: alarm-clock-dist
+          path: artifact
       - name: Prepare SSH key
         run: |
           mkdir -p ~/.ssh
@@ -71,6 +82,7 @@ jobs:
           APP_DIR: ${{ env.APP_DIR }}
           APP_PORT: ${{ env.APP_PORT }}
         run: |
+          scp -i ~/.ssh/server_key artifact/dist.tgz "${SERVER_USER}@${SERVER_HOST}:/tmp/alarm-clock-dist.tgz"
           ssh -i ~/.ssh/server_key "${SERVER_USER}@${SERVER_HOST}" "APP_DIR='${APP_DIR}' APP_PORT='${APP_PORT}' IMAGE='${IMAGE}' bash -s" <<'REMOTE'
           set -euo pipefail
           sudo mkdir -p "$APP_DIR"
@@ -85,8 +97,24 @@ jobs:
               ports:
                 - "${APP_PORT}:80"
           COMPOSE
-          sudo docker compose pull
-          sudo docker compose up -d
+          for i in 1 2 3; do
+            if sudo docker compose pull; then
+              break
+            fi
+            echo "docker compose pull failed (attempt $i), retrying in 10s"
+            sleep 10
+          done
+          sudo docker compose up -d || true
+          if ! sudo docker ps --format '{{.Names}}' | grep -qx alarm-clock; then
+            echo "alarm-clock container is not running after compose up" >&2
+            exit 1
+          fi
+          sudo mkdir -p /tmp/alarm-clock-dist
+          sudo rm -rf /tmp/alarm-clock-dist/*
+          sudo tar -xzf /tmp/alarm-clock-dist.tgz -C /tmp/alarm-clock-dist
+          sudo docker exec alarm-clock sh -c 'rm -rf /usr/share/nginx/html/*'
+          sudo tar -C /tmp/alarm-clock-dist -cf - . | sudo docker exec -i alarm-clock tar -C /usr/share/nginx/html -xf -
+          sudo docker restart alarm-clock >/dev/null
           sudo docker image prune -f
           sudo docker compose ps
           REMOTE
