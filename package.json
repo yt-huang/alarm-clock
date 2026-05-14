@@ -1,0 +1,17 @@
+{
+  "name": "alarm-clock",
+  "version": "1.0.0",
+  "description": "产品化定时闹钟 Web 应用：当前时间、多策略闹钟、倒计时、贪睡、本地持久化。",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "@vitejs/plugin-legacy": "latest",
+    "vite": "latest"
+  },
+  "devDependencies": {}
+}

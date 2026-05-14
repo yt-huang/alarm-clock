@@ -1,0 +1,7 @@
+services:
+  alarm-clock:
+    image: ${IMAGE:-ghcr.io/yt-huang/alarm-clock:latest}
+    container_name: alarm-clock
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8025}:80"

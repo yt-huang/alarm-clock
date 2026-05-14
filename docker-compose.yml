@@ -1,0 +1,8 @@
+services:
+  alarm-clock:
+    build: .
+    image: alarm-clock:local
+    container_name: alarm-clock
+    restart: unless-stopped
+    ports:
+      - "8025:80"
