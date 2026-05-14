@@ -1,5 +1,5 @@
 import './styles.css';
-import { WEEKDAY_LABELS, STRATEGY_LABELS, createAlarm, computeNextDue, shouldFire, fireAlarm, snoozeAlarm, timeText, dateText, nextDueLabel, dateKey } from './alarmEngine.js';
+import { WEEKDAY_LABELS, STRATEGY_LABELS, createAlarm, computeNextDue, shouldFire, fireAlarm, snoozeAlarm, timeText, dateText, nextDueLabel, dateKey, intervalPhaseLabel, alertMessage } from './alarmEngine.js';
 
 const STORAGE_KEY = 'timepilot.alarms.v1';
 const state = { alarms: [], now: new Date(), activeAlert: null, audio: null };
@@ -23,14 +23,14 @@ function beep(alarm) {
 }
 function notify(alarm) {
   beep(alarm); document.body.classList.add('ringing'); setTimeout(()=>document.body.classList.remove('ringing'), 1800);
-  if ('Notification' in window && Notification.permission === 'granted') new Notification(`⏰ ${alarm.title}`, { body: alarm.note || '闹钟时间到', tag: alarm.id });
+  if ('Notification' in window && Notification.permission === 'granted') new Notification(`⏰ ${alarm.title}`, { body: alertMessage(alarm), tag: alarm.id });
 }
 function addAlarm(formData) {
   const weekdays = [...document.querySelectorAll('input[name="weekday"]:checked')].map(i => Number(i.value));
   const alarm = createAlarm({
     title: formData.get('title'), note: formData.get('note'), strategy: formData.get('strategy'),
     time: formData.get('time'), date: formData.get('date'), weekdays,
-    timerMinutes: formData.get('timerMinutes'), snoozeMinutes: formData.get('snoozeMinutes'),
+    timerMinutes: formData.get('timerMinutes'), intervalMinutes: formData.get('intervalMinutes'), restMinutes: formData.get('restMinutes'), snoozeMinutes: formData.get('snoozeMinutes'),
     maxSnoozes: formData.get('maxSnoozes'), sound: formData.get('sound'), volume: formData.get('volume')
   });
   alarm.nextDueAt = computeNextDue(alarm, new Date());
@@ -40,7 +40,7 @@ function updateAlarm(id, patch) {
   state.alarms = state.alarms.map(a => {
     if (a.id !== id) return a;
     const next = { ...a, ...patch, updatedAt: new Date().toISOString() };
-    if ('enabled' in patch || 'strategy' in patch || 'time' in patch || 'date' in patch) next.nextDueAt = computeNextDue(next, new Date());
+    if ('enabled' in patch || 'strategy' in patch || 'time' in patch || 'date' in patch || 'intervalMinutes' in patch || 'restMinutes' in patch) next.nextDueAt = computeNextDue(next, new Date());
     return next;
   }); save(); render();
 }
@@ -66,10 +66,12 @@ function renderForm() {
   return `<section class="card form-card"><div class="section-title"><span>新建闹钟</span><button id="permissionBtn" class="ghost" type="button">开启通知</button></div>
     <form id="alarmForm" class="alarm-form">
       <label>名称<input name="title" placeholder="晨会 / 午休 / 喝水" required /></label>
-      <label>策略<select name="strategy" id="strategy"><option value="once">一次性</option><option value="daily" selected>每日</option><option value="weekdays">工作日</option><option value="weekends">周末</option><option value="weekly">指定星期</option><option value="timer">倒计时</option></select></label>
+      <label>策略<select name="strategy" id="strategy"><option value="once">一次性</option><option value="daily" selected>每日</option><option value="weekdays">工作日</option><option value="weekends">周末</option><option value="weekly">指定星期</option><option value="timer">倒计时</option><option value="interval">循环休息（每 N 分钟休息 M 分钟）</option></select></label>
       <label class="time-field">时间<input name="time" type="time" value="08:30" /></label>
       <label class="date-field">日期<input name="date" type="date" value="${today}" /></label>
       <label class="timer-field">倒计时分钟<input name="timerMinutes" type="number" min="1" value="5" /></label>
+      <label class="interval-field">专注分钟<input name="intervalMinutes" type="number" min="1" value="60" /></label>
+      <label class="interval-field">休息分钟<input name="restMinutes" type="number" min="1" value="10" /></label>
       <div class="weekday-field"><span>星期</span><div class="weekday-grid">${WEEKDAY_LABELS.map((w,i)=>`<label><input type="checkbox" name="weekday" value="${i}" ${i===1?'checked':''}/> ${w}</label>`).join('')}</div></div>
       <label>铃声<select name="sound"><option value="classic">经典</option><option value="gentle">轻柔</option><option value="urgent">紧急</option></select></label>
       <label>音量<input name="volume" type="range" min="5" max="100" value="70" /></label>
@@ -79,12 +81,17 @@ function renderForm() {
       <button class="primary full" type="submit">添加闹钟</button>
     </form></section>`;
 }
+function alarmSummary(a) {
+  if (a.strategy === 'timer') return `${a.timerMinutes} 分钟`;
+  if (a.strategy === 'interval') return intervalPhaseLabel(a);
+  return a.time;
+}
 function renderList() {
   const list = $('#alarmList'); if (!list) return;
   const enabled = state.alarms.filter(a=>a.enabled).length;
   $('#stats').innerHTML = `<b>${state.alarms.length}</b> 个闹钟 · <b>${enabled}</b> 个启用`;
   list.innerHTML = state.alarms.length ? state.alarms.map(a => `<article class="alarm ${a.enabled?'':'disabled'}">
-    <div class="alarm-main"><div><h3>${escapeHtml(a.title)}</h3><p>${STRATEGY_LABELS[a.strategy]} · ${a.strategy==='timer'?`${a.timerMinutes} 分钟`:a.time} · ${nextDueLabel(a.nextDueAt, state.now)}</p>${a.note?`<small>${escapeHtml(a.note)}</small>`:''}</div>
+    <div class="alarm-main"><div><h3>${escapeHtml(a.title)}</h3><p>${STRATEGY_LABELS[a.strategy]} · ${alarmSummary(a)} · ${nextDueLabel(a.nextDueAt, state.now)}</p>${a.note?`<small>${escapeHtml(a.note)}</small>`:''}</div>
     <label class="switch"><input type="checkbox" data-action="toggle" data-id="${a.id}" ${a.enabled?'checked':''}/><span></span></label></div>
     <div class="alarm-actions"><button data-action="test" data-id="${a.id}">试听</button><button data-action="snooze" data-id="${a.id}" ${a.snoozeCount>=a.maxSnoozes?'disabled':''}>贪睡 ${a.snoozeCount||0}/${a.maxSnoozes}</button><button class="danger" data-action="delete" data-id="${a.id}">删除</button></div>
   </article>`).join('') : `<div class="empty">还没有闹钟。可以先创建一个“每日 08:30”的晨间提醒，或用倒计时做番茄钟。</div>`;
@@ -94,7 +101,7 @@ function renderAlert() {
   if (!state.activeAlert) { box.classList.remove('show'); box.innerHTML=''; return; }
   const a = state.activeAlert;
   box.classList.add('show');
-  box.innerHTML = `<div class="modal-card"><div class="alarm-icon">⏰</div><h2>${escapeHtml(a.title)}</h2><p>${escapeHtml(a.note || '闹钟时间到')}</p><div class="modal-actions"><button id="dismissAlert" class="primary">知道了</button><button id="snoozeAlert">贪睡 ${a.snoozeMinutes} 分钟</button></div></div>`;
+  box.innerHTML = `<div class="modal-card"><div class="alarm-icon">⏰</div><h2>${escapeHtml(a.title)}</h2><p>${escapeHtml(alertMessage(a))}</p><div class="modal-actions"><button id="dismissAlert" class="primary">知道了</button><button id="snoozeAlert">贪睡 ${a.snoozeMinutes} 分钟</button></div></div>`;
 }
 function escapeHtml(s='') { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function bindEvents() {

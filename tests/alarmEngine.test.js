@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAlarm, computeNextDue, shouldFire, fireAlarm, snoozeAlarm } from '../src/alarmEngine.js';
+import { createAlarm, computeNextDue, shouldFire, fireAlarm, snoozeAlarm, alertMessage, intervalPhaseLabel } from '../src/alarmEngine.js';
 
 test('daily alarm computes next same day when future', () => {
   const alarm = createAlarm({ strategy: 'daily', time: '09:30' });
@@ -34,4 +34,22 @@ test('fire disables once alarm and snooze schedules future', () => {
   assert.equal(fired.enabled, false);
   const snoozed = snoozeAlarm(alarm, base);
   assert.equal(snoozed.nextDueAt, '2026-05-14T09:03:00.000Z');
+});
+
+test('interval break strategy alternates focus and rest phases', () => {
+  const base = new Date('2026-05-14T09:00:00Z');
+  let alarm = createAlarm({ strategy: 'interval', intervalMinutes: 60, restMinutes: 10 });
+  alarm.nextDueAt = computeNextDue(alarm, base);
+  assert.equal(alarm.nextDueAt, '2026-05-14T10:00:00.000Z');
+  assert.match(intervalPhaseLabel(alarm), /每 60 分钟休息 10 分钟/);
+
+  const rest = fireAlarm(alarm, new Date('2026-05-14T10:00:00Z'));
+  assert.equal(rest.intervalPhase, 'rest');
+  assert.equal(rest.nextDueAt, '2026-05-14T10:10:00.000Z');
+  assert.equal(alertMessage(alarm), '已经专注 60 分钟，休息 10 分钟吧');
+
+  const work = fireAlarm(rest, new Date('2026-05-14T10:10:00Z'));
+  assert.equal(work.intervalPhase, 'work');
+  assert.equal(work.nextDueAt, '2026-05-14T11:10:00.000Z');
+  assert.equal(alertMessage(rest), '休息结束，回到专注时间');
 });
